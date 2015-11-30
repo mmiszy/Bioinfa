@@ -76,7 +76,7 @@ public:
         this->generate_grid();
     }
 
-    std::pair<std::string, std::string> local_alignment() {
+    std::pair<std::string, std::string> global_alignment() {
         int len1 = this->str_a.length() + 1;
         int len2 = this->str_b.length() + 1;
 

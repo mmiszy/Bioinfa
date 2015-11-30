@@ -10,7 +10,7 @@ public:
 
         Alignment alignment = Alignment(string_a, string_b);
 
-        std::pair<std::string, std::string> result = alignment.local_alignment();
+        std::pair<std::string, std::string> result = alignment.global_alignment();
 
         std::string expected_a = "GCATG-CU";
         std::string expected_b = "G-ATTACA";
