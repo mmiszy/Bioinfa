@@ -6,5 +6,6 @@ int main() {
     AlignmentTest suite = AlignmentTest();
     suite.test1();
     suite.test2();
+    suite.test3();
     return 0;
 }

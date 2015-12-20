@@ -1,6 +1,7 @@
 #include <string>
 #include <vector>
 #include <algorithm>
+#include <map>
 
 class Alignment {
 public:
@@ -32,16 +33,31 @@ private:
 
     std::vector<std::vector<int>> grid;
     std::vector<std::vector<Alignment::DIRECTIONS>> track;
+    std::map<char, int> char_to_similarity_index;
 
-    void generate_grid() {
+    std::vector<std::vector<int>> get_default_similarity_matrix() {
+        const int SIMILARITY_MATRIX_SIZE = 5;
+        std::vector<std::vector<int>> similarity = std::vector<std::vector<int>>(SIMILARITY_MATRIX_SIZE,
+            std::vector<int>(SIMILARITY_MATRIX_SIZE, this->WEIGHTS.MISMATCH));
+
+        for (int i = 0; i < SIMILARITY_MATRIX_SIZE; ++i) {
+            similarity[i][i] = this->WEIGHTS.MATCH;
+        }
+
+        return similarity;
+    }
+
+    void generate_grid(std::vector<std::vector<int>> similarity) {
         int len1 = this->str_a.length() + 1;
         int len2 = this->str_b.length() + 1;
 
-        this->grid = std::vector<std::vector<int>>(len1, std::vector<int>(len2));
-        this->track = std::vector<std::vector<Alignment::DIRECTIONS>>(len1, std::vector<Alignment::DIRECTIONS>(len2));
+        //row is for iterating the first string, col for the second
 
-        for (int row = 0; row < len1; ++row) {
-            for (int col = 0; col < len2; ++col) {
+        this->grid = std::vector<std::vector<int>>(len2, std::vector<int>(len1));
+        this->track = std::vector<std::vector<Alignment::DIRECTIONS>>(len2, std::vector<Alignment::DIRECTIONS>(len1));
+
+        for (int row = 0; row < len2; ++row) {
+            for (int col = 0; col < len1; ++col) {
                 int top, left, diagonal;
                 top = left = diagonal = INT32_MIN;
 
@@ -57,13 +73,11 @@ private:
                     diagonal = 0;
                 }
                 else if (col != 0 && row != 0) {
+                    char a = this->str_a[col - 1];
+                    char b = this->str_b[row - 1];
+
                     diagonal = this->grid[row - 1][col - 1];
-                    if (this->str_a[col - 1] == this->str_b[row - 1]) {
-                        diagonal += this->WEIGHTS.MATCH;
-                    }
-                    else {
-                        diagonal += this->WEIGHTS.MISMATCH;
-                    }
+                    diagonal += similarity[this->char_to_similarity_index[a]][this->char_to_similarity_index[b]];
                 }
 
                 int result = std::max({ top, left, diagonal });
@@ -83,21 +97,37 @@ private:
         }
     }
 
+    void dump_grid() {
+        for (auto row : this->grid) {
+            for (auto col : row) {
+                printf_s("%d\t", col);
+            }
+
+            printf_s("\n");
+        }
+    }
+
 public:
-    Alignment(std::string str_a, std::string str_b) : Alignment(str_a, str_b, STR_WEIGHTS()) {}
-    Alignment(std::string str_a, std::string str_b, STR_WEIGHTS w) {
+    Alignment(std::string str_a, std::string str_b, STR_WEIGHTS w = STR_WEIGHTS(), std::vector<std::vector<int>> similarity = std::vector<std::vector<int>>()) {
         this->str_a = str_a;
         this->str_b = str_b;
-        this->WEIGHTS = STR_WEIGHTS(w);
-        this->generate_grid();
+        this->WEIGHTS = w;
+        this->char_to_similarity_index = std::map<char, int>({ {'A', 0}, {'G', 1}, {'C', 2}, {'T', 3}, {' ', 4} });
+
+        if (similarity.size() == 0) {
+            similarity = this->get_default_similarity_matrix();
+        }
+
+        this->generate_grid(similarity);
+        this->dump_grid();
     }
 
     std::pair<std::string, std::string> global_alignment() {
         int len1 = this->str_a.length() + 1;
         int len2 = this->str_b.length() + 1;
 
-        int row = len1 - 1;
-        int col = len2 - 1;
+        int row = len2 - 1;
+        int col = len1 - 1;
 
         std::vector<std::pair<int, int>> path = std::vector<std::pair<int, int>>();
 
@@ -174,7 +204,8 @@ public:
         while (true) {
             if (row <= 0 || col <= 0) {
                 break;
-            } else if (this->grid[row][col] < 0) {
+            }
+            else if (this->grid[row][col] < 0) {
                 break;
             }
 
