@@ -62,4 +62,19 @@ public:
             this->testFailed("Test3");
         }
     }
+
+    void test4() {
+        std::string string_a = "CATTCG";
+        std::string string_b = "TATTAGG";
+
+        Alignment alignment = Alignment(string_a, string_b, Alignment::STR_WEIGHTS(1, -1, -1));
+
+        int result = alignment.get_edit_distance();
+
+        int expected_result = 3;
+
+        if (result != expected_result) {
+            this->testFailed("Test4");
+        }
+    }
 };

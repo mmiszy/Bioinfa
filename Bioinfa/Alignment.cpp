@@ -32,6 +32,7 @@ private:
     std::string str_b;
 
     std::vector<std::vector<int>> grid;
+    std::vector<std::vector<int>> distanceGrid;
     std::vector<std::vector<Alignment::DIRECTIONS>> track;
     std::map<char, int> char_to_similarity_index;
 
@@ -47,7 +48,22 @@ private:
         return similarity;
     }
 
-    void generate_grid(std::vector<std::vector<int>> similarity) {
+    std::vector<std::vector<int>> get_default_distance_matrix() {
+        const int DISTANCE_MATRIX_SIZE = 5;
+        const int DISTANCE_MATCH = 0;
+        const int DISTANCE_MISMATCH = 1;
+
+        std::vector<std::vector<int>> distance = std::vector<std::vector<int>>(DISTANCE_MATRIX_SIZE,
+            std::vector<int>(DISTANCE_MATRIX_SIZE, DISTANCE_MISMATCH));
+
+        for (int i = 0; i < DISTANCE_MATRIX_SIZE; ++i) {
+            distance[i][i] = DISTANCE_MATCH;
+        }
+
+        return distance;
+    }
+
+    void generate_alignment_grid(std::vector<std::vector<int>> similarity) {
         int len1 = this->str_a.length() + 1;
         int len2 = this->str_b.length() + 1;
 
@@ -97,8 +113,46 @@ private:
         }
     }
 
+    void generate_distance_grid(std::vector<std::vector<int>> distance) {
+        int len1 = this->str_a.length() + 1;
+        int len2 = this->str_b.length() + 1;
+
+        this->distanceGrid = std::vector<std::vector<int>>(len2, std::vector<int>(len1));
+
+        const int DISTANCE_INDEL = 1;
+
+        for (int row = 0; row < len2; ++row) {
+            for (int col = 0; col < len1; ++col) {
+                int top, left, diagonal;
+                top = left = diagonal = INT32_MAX;
+
+                if (col != 0) {
+                    left = this->distanceGrid[row][col - 1] + DISTANCE_INDEL;
+                }
+
+                if (row != 0) {
+                    top = this->distanceGrid[row - 1][col] + DISTANCE_INDEL;
+                }
+
+                if (col == 0 && row == 0) {
+                    diagonal = 0;
+                }
+                else if (col != 0 && row != 0) {
+                    char a = this->str_a[col - 1];
+                    char b = this->str_b[row - 1];
+
+                    diagonal = this->distanceGrid[row - 1][col - 1];
+                    diagonal += distance[this->char_to_similarity_index[a]][this->char_to_similarity_index[b]];
+                }
+
+                int result = std::min({ top, left, diagonal });
+                this->distanceGrid[row][col] = result;
+            }
+        }
+    }
+
     void dump_grid() {
-        for (auto row : this->grid) {
+        for (auto row : this->distanceGrid) {
             for (auto col : row) {
                 printf_s("%d\t", col);
             }
@@ -108,7 +162,9 @@ private:
     }
 
 public:
-    Alignment(std::string str_a, std::string str_b, STR_WEIGHTS w = STR_WEIGHTS(), std::vector<std::vector<int>> similarity = std::vector<std::vector<int>>()) {
+    Alignment(std::string str_a, std::string str_b, STR_WEIGHTS w = STR_WEIGHTS(), 
+        std::vector<std::vector<int>> similarity = std::vector<std::vector<int>>(), 
+        std::vector<std::vector<int>> distance = std::vector<std::vector<int>>()) {
         this->str_a = str_a;
         this->str_b = str_b;
         this->WEIGHTS = w;
@@ -118,7 +174,12 @@ public:
             similarity = this->get_default_similarity_matrix();
         }
 
-        this->generate_grid(similarity);
+        if (distance.size() == 0) {
+            distance = this->get_default_distance_matrix();
+        }
+
+        this->generate_alignment_grid(similarity);
+        this->generate_distance_grid(distance);
         this->dump_grid();
     }
 
@@ -176,10 +237,6 @@ public:
         }
 
         return std::pair<std::string, std::string>(top, side);
-    }
-
-    bool operator () (std::pair<int, int> i, std::pair<int, int> j) {
-        return this->grid[i.first][i.second] < this->grid[j.first][j.second];
     }
 
     std::pair<std::string, std::string> local_alignment() {
@@ -249,5 +306,9 @@ public:
         }
 
         return std::pair<std::string, std::string>(top, side);
+    }
+
+    int get_edit_distance() {
+        return this->distanceGrid.back().back();
     }
 };
