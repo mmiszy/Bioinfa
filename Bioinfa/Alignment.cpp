@@ -93,7 +93,13 @@ private:
                     char b = this->str_b[row - 1];
 
                     diagonal = this->grid[row - 1][col - 1];
-                    diagonal += similarity[this->char_to_similarity_index[a]][this->char_to_similarity_index[b]];
+                    if (this->char_to_similarity_index.find(a) == this->char_to_similarity_index.end() ||
+                        this->char_to_similarity_index.find(b) == this->char_to_similarity_index.end()) {
+                        diagonal += this->WEIGHTS.MISMATCH;
+                    }
+                    else {
+                        diagonal += similarity[this->char_to_similarity_index[a]][this->char_to_similarity_index[b]];
+                    }
                 }
 
                 int result = std::max({ top, left, diagonal });
@@ -142,22 +148,18 @@ private:
                     char b = this->str_b[row - 1];
 
                     diagonal = this->distanceGrid[row - 1][col - 1];
-                    diagonal += distance[this->char_to_similarity_index[a]][this->char_to_similarity_index[b]];
+
+                    if (this->char_to_similarity_index.find(a) == this->char_to_similarity_index.end() ||
+                        this->char_to_similarity_index.find(b) == this->char_to_similarity_index.end()) {
+                        diagonal += a == b ? 0 : 1;
+                    } else {
+                        diagonal += distance[this->char_to_similarity_index[a]][this->char_to_similarity_index[b]];
+                    }
                 }
 
                 int result = std::min({ top, left, diagonal });
                 this->distanceGrid[row][col] = result;
             }
-        }
-    }
-
-    void dump_grid() {
-        for (auto row : this->distanceGrid) {
-            for (auto col : row) {
-                printf_s("%d\t", col);
-            }
-
-            printf_s("\n");
         }
     }
 
@@ -180,7 +182,6 @@ public:
 
         this->generate_alignment_grid(similarity);
         this->generate_distance_grid(distance);
-        this->dump_grid();
     }
 
     std::pair<std::string, std::string> global_alignment() {
@@ -310,5 +311,9 @@ public:
 
     int get_edit_distance() {
         return this->distanceGrid.back().back();
+    }
+
+    int get_similarity() {
+        return this->grid.back().back();
     }
 };

@@ -64,17 +64,32 @@ public:
     }
 
     void test4() {
-        std::string string_a = "CATTCG";
-        std::string string_b = "TATTAGG";
+        std::string string_a = "GCATGCU";
+        std::string string_b = "GATTACA";
 
         Alignment alignment = Alignment(string_a, string_b, Alignment::STR_WEIGHTS(1, -1, -1));
 
         int result = alignment.get_edit_distance();
 
-        int expected_result = 3;
+        int expected_result = 4;
 
         if (result != expected_result) {
             this->testFailed("Test4");
+        }
+    }
+
+    void test5() {
+        std::string string_a = "GCATGCU";
+        std::string string_b = "GATTACA";
+
+        Alignment alignment = Alignment(string_a, string_b, Alignment::STR_WEIGHTS(1, -1, -1));
+
+        int result = alignment.get_similarity();
+
+        int expected_result = 0;
+
+        if (result != expected_result) {
+            this->testFailed("Test5");
         }
     }
 };
