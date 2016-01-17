@@ -1,319 +1,371 @@
 #include <string>
 #include <vector>
 #include <algorithm>
+#include "Alignment.h"
 #include <map>
+#include <ostream>
+#include <iostream>
 
-class Alignment {
-public:
-    static struct STR_WEIGHTS {
-    private:
-        static const int DEFAULT_MATCH = 1;
-        static const int DEFAULT_MISMATCH = -1;
-        static const int DEFAULT_INDEL = -1;
 
-    public:
-        int MATCH;
-        int MISMATCH;
-        int INDEL;
-        STR_WEIGHTS() : MATCH(STR_WEIGHTS::DEFAULT_MATCH), MISMATCH(STR_WEIGHTS::DEFAULT_MISMATCH), INDEL(STR_WEIGHTS::DEFAULT_INDEL) {}
-        STR_WEIGHTS(int match, int mismatch, int indel) : MATCH(match), MISMATCH(mismatch), INDEL(indel) {}
-    };
+std::vector<std::vector<int>> Alignment::get_default_similarity_matrix()
+{
+    const int SIMILARITY_MATRIX_SIZE = 5;
+    std::vector<std::vector<int>> similarity = std::vector<std::vector<int>>(SIMILARITY_MATRIX_SIZE,
+                                                                             std::vector<int>(
+                                                                                     SIMILARITY_MATRIX_SIZE,
+                                                                                     this->WEIGHTS.MISMATCH));
 
-private:
-    static enum class DIRECTIONS { TOP, LEFT, DIAGONAL };
-
-    static const char GAP_SYMBOL = '-';
-
-    static const STR_WEIGHTS DEFAULT_WEIGHTS;
-
-    STR_WEIGHTS WEIGHTS;
-
-    std::string str_a;
-    std::string str_b;
-
-    std::vector<std::vector<int>> grid;
-    std::vector<std::vector<int>> distanceGrid;
-    std::vector<std::vector<Alignment::DIRECTIONS>> track;
-    std::map<char, int> char_to_similarity_index;
-
-    std::vector<std::vector<int>> get_default_similarity_matrix() {
-        const int SIMILARITY_MATRIX_SIZE = 5;
-        std::vector<std::vector<int>> similarity = std::vector<std::vector<int>>(SIMILARITY_MATRIX_SIZE,
-            std::vector<int>(SIMILARITY_MATRIX_SIZE, this->WEIGHTS.MISMATCH));
-
-        for (int i = 0; i < SIMILARITY_MATRIX_SIZE; ++i) {
-            similarity[i][i] = this->WEIGHTS.MATCH;
-        }
-
-        return similarity;
+    for (int i = 0; i < SIMILARITY_MATRIX_SIZE; ++i)
+    {
+        similarity[i][i] = this->WEIGHTS.MATCH;
     }
 
-    std::vector<std::vector<int>> get_default_distance_matrix() {
-        const int DISTANCE_MATRIX_SIZE = 5;
-        const int DISTANCE_MATCH = 0;
-        const int DISTANCE_MISMATCH = 1;
+    return similarity;
+}
 
-        std::vector<std::vector<int>> distance = std::vector<std::vector<int>>(DISTANCE_MATRIX_SIZE,
-            std::vector<int>(DISTANCE_MATRIX_SIZE, DISTANCE_MISMATCH));
+void Alignment::generate_alignment_grid(std::vector<std::vector<int>> similarity)
+{
+    unsigned long len_u = this->str_u.length() + 1;
+    unsigned long len_w = this->str_w.length() + 1;
 
-        for (int i = 0; i < DISTANCE_MATRIX_SIZE; ++i) {
-            distance[i][i] = DISTANCE_MATCH;
-        }
+    // row is for iterating the first string, col for the second
 
-        return distance;
+//    this->grid = std::vector<std::vector<int>>(len_w, std::vector<int>(len_u));
+    this->A = std::vector<std::vector<int>>(len_u, std::vector<int>(len_w, std::numeric_limits<int>::min()));
+    this->B = std::vector<std::vector<int>>(len_u, std::vector<int>(len_w, std::numeric_limits<int>::min()));
+    this->C = std::vector<std::vector<int>>(len_u, std::vector<int>(len_w, std::numeric_limits<int>::min()));
+    this->S = std::vector<std::vector<int>>(len_u, std::vector<int>(len_w, std::numeric_limits<int>::min()));
+
+    this->track = std::vector<std::vector<Alignment::DIRECTIONS>>(len_w, std::vector<Alignment::DIRECTIONS>(len_u));
+
+    // A(i,j) = maksymalne dopasowanie przedrostków u[1..i] w[1..j], przy warunku: w[j] połączono z ‘–‘.
+    // B(i,j) = maksymalne dopasowanie przedrostków u[1..i] w[1..j], przy warunku: u[i] połączono z ‘–‘.
+    // C(i,j) = maksymalne dopasowanie przedrostków u[1..i] w[1..j], przy warunku: u[i] połączono z w[j].
+    // S(i,j) = maksymalne dopasowanie u[1..i] z w[1..j].
+
+    S[0][0] = 0;
+    this->track[0][0] = Alignment::DIRECTIONS::DIAGONAL;
+
+    for (int i = 1; i < len_u; ++i)
+    {
+        S[i][0] = B[i][0] = this->penaltyFn(i);
+        this->track[0][i] = Alignment::DIRECTIONS::TOP;
+    }
+    for (int j = 1; j < len_w; ++j)
+    {
+        S[0][j] = A[0][j] = this->penaltyFn(j);
+        this->track[j][0] = Alignment::DIRECTIONS::LEFT;
     }
 
-    void generate_alignment_grid(std::vector<std::vector<int>> similarity) {
-        int len1 = this->str_a.length() + 1;
-        int len2 = this->str_b.length() + 1;
-
-        //row is for iterating the first string, col for the second
-
-        this->grid = std::vector<std::vector<int>>(len2, std::vector<int>(len1));
-        this->track = std::vector<std::vector<Alignment::DIRECTIONS>>(len2, std::vector<Alignment::DIRECTIONS>(len1));
-
-        for (int row = 0; row < len2; ++row) {
-            for (int col = 0; col < len1; ++col) {
-                int top, left, diagonal;
-                top = left = diagonal = INT32_MIN;
-
-                if (col != 0) {
-                    left = this->grid[row][col - 1] + this->WEIGHTS.INDEL;
+    for (int j = 1; j < len_w; ++j)
+    {
+        for (int i = 1; i < len_u; ++i)
+        {
+            // col = i
+            // row = j
+            int left, top, diagonal;
+            left = top = diagonal = std::numeric_limits<int>::min();
+            {
+                // A(i,j)=max k∈{0,j–1} { max{ B(i,k), C(i,k) } + p(j–k) }
+                for (int k = 0; k <= (j-1); ++k) {
+                    left = std::max(left, std::max(B[i][k], C[i][k]) + this->penaltyFn(j - k));
                 }
+//                int k = 0;
+//                left = std::max(left, std::max(B[i][k], C[i][k]) + this->penaltyFn(j - k));
+//                k = j - 1;
+//                left = std::max(left, std::max(B[i][k], C[i][k]) + this->penaltyFn(j - k));
 
-                if (row != 0) {
-                    top = this->grid[row - 1][col] + this->WEIGHTS.INDEL;
-                }
-
-                if (col == 0 && row == 0) {
-                    diagonal = 0;
-                }
-                else if (col != 0 && row != 0) {
-                    char a = this->str_a[col - 1];
-                    char b = this->str_b[row - 1];
-
-                    diagonal = this->grid[row - 1][col - 1];
-                    if (this->char_to_similarity_index.find(a) == this->char_to_similarity_index.end() ||
-                        this->char_to_similarity_index.find(b) == this->char_to_similarity_index.end()) {
-                        diagonal += this->WEIGHTS.MISMATCH;
-                    }
-                    else {
-                        diagonal += similarity[this->char_to_similarity_index[a]][this->char_to_similarity_index[b]];
-                    }
-                }
-
-                int result = std::max({ top, left, diagonal });
-
-                if (result == top) {
-                    this->track[row][col] = Alignment::DIRECTIONS::TOP;
-                }
-                else if (result == left) {
-                    this->track[row][col] = Alignment::DIRECTIONS::LEFT;
-                }
-                else {
-                    this->track[row][col] = Alignment::DIRECTIONS::DIAGONAL;
-                }
-
-                this->grid[row][col] = result;
+                A[i][j] = left;
             }
-        }
-    }
-
-    void generate_distance_grid(std::vector<std::vector<int>> distance) {
-        int len1 = this->str_a.length() + 1;
-        int len2 = this->str_b.length() + 1;
-
-        this->distanceGrid = std::vector<std::vector<int>>(len2, std::vector<int>(len1));
-
-        const int DISTANCE_INDEL = 1;
-
-        for (int row = 0; row < len2; ++row) {
-            for (int col = 0; col < len1; ++col) {
-                int top, left, diagonal;
-                top = left = diagonal = INT32_MAX;
-
-                if (col != 0) {
-                    left = this->distanceGrid[row][col - 1] + DISTANCE_INDEL;
+            {
+                // B(i,j)=max k∈{0,i–1} { max { A(k,j), C(k,j) } + p(i–k) }
+                for (int k = 0; k <= (i-1); ++k) {
+                    top = std::max(top, std::max(A[k][j], C[k][j]) + this->penaltyFn(i - k));
                 }
+//                int k = 0;
+//                top = std::max(top, std::max(A[k][j], C[k][j]) + this->penaltyFn(i - k));
+//                k = i - 1;
+//                top = std::max(top, std::max(A[k][j], C[k][j]) + this->penaltyFn(i - k));
+                B[i][j] = top;
+            }
+            {
+                // C(i,j)= S(i–1,j–1)+ s(u[i],w[j])
+                char u = this->str_u[i-1];
+                char w = this->str_w[j-1];
 
-                if (row != 0) {
-                    top = this->distanceGrid[row - 1][col] + DISTANCE_INDEL;
+                diagonal = S[i - 1][j - 1] +
+                           similarity[this->char_to_similarity_index[u]][this->char_to_similarity_index[w]];
+
+                C[i][j] = diagonal;
+            }
+            {
+                // S(i,j)=max{A(i,j), B(i,j), C(i,j)}
+                int result = std::max({A[i][j], B[i][j], C[i][j]});
+                S[i][j] = result;
+
+                if (result == left)
+                {
+                    this->track[j][i] = Alignment::DIRECTIONS::LEFT;
                 }
-
-                if (col == 0 && row == 0) {
-                    diagonal = 0;
+                else if (result == top)
+                {
+                    this->track[j][i] = Alignment::DIRECTIONS::TOP;
                 }
-                else if (col != 0 && row != 0) {
-                    char a = this->str_a[col - 1];
-                    char b = this->str_b[row - 1];
-
-                    diagonal = this->distanceGrid[row - 1][col - 1];
-
-                    if (this->char_to_similarity_index.find(a) == this->char_to_similarity_index.end() ||
-                        this->char_to_similarity_index.find(b) == this->char_to_similarity_index.end()) {
-                        diagonal += a == b ? 0 : 1;
-                    } else {
-                        diagonal += distance[this->char_to_similarity_index[a]][this->char_to_similarity_index[b]];
-                    }
+                else
+                {
+                    this->track[j][i] = Alignment::DIRECTIONS::DIAGONAL;
                 }
-
-                int result = std::min({ top, left, diagonal });
-                this->distanceGrid[row][col] = result;
             }
         }
     }
 
-public:
-    Alignment(std::string str_a, std::string str_b, STR_WEIGHTS w = STR_WEIGHTS(), 
-        std::vector<std::vector<int>> similarity = std::vector<std::vector<int>>(), 
-        std::vector<std::vector<int>> distance = std::vector<std::vector<int>>()) {
-        this->str_a = str_a;
-        this->str_b = str_b;
-        this->WEIGHTS = w;
-        this->char_to_similarity_index = std::map<char, int>({ {'A', 0}, {'G', 1}, {'C', 2}, {'T', 3}, {' ', 4} });
+//    for (int j = 0; j < len_w; ++j)
+//    {
+//        for (int i = 0; i < len_u; ++i)
+//        {
+//            int top, left, diagonal;
+//            top = left = diagonal = INT32_MIN;
+//
+//            if (i != 0)
+//            {
+//                left = this->grid[j][i - 1] + this->WEIGHTS.INDEL;
+//            }
+//
+//            if (j != 0)
+//            {
+//                top = this->grid[j - 1][i] + this->WEIGHTS.INDEL;
+//            }
+//
+//            if (i == 0 && j == 0)
+//            {
+//                diagonal = 0;
+//            }
+//            else if (i != 0 && j != 0)
+//            {
+//                char a = this->str_u[i - 1];
+//                char b = this->str_w[j - 1];
+//
+//                diagonal = this->grid[j - 1][i - 1];
+//                if (this->char_to_similarity_index.find(a) == this->char_to_similarity_index.end() ||
+//                    this->char_to_similarity_index.find(b) == this->char_to_similarity_index.end())
+//                {
+//                    diagonal += this->WEIGHTS.MISMATCH;
+//                }
+//                else
+//                {
+//                    diagonal += similarity[this->char_to_similarity_index[a]][this->char_to_similarity_index[b]];
+//                }
+//            }
+//
+//            int result = std::max({top, left, diagonal});
+//
+//
+//            if (result == top)
+//            {
+//                this->track[j][i] = Alignment::DIRECTIONS::TOP;
+//            }
+//            else if (result == left)
+//            {
+//                this->track[j][i] = Alignment::DIRECTIONS::LEFT;
+//            }
+//            else
+//            {
+//                this->track[j][i] = Alignment::DIRECTIONS::DIAGONAL;
+//            }
+//
+//            this->grid[j][i] = result;
+//        }
+//    }
+}
 
-        if (similarity.size() == 0) {
-            similarity = this->get_default_similarity_matrix();
-        }
+Alignment::Alignment(std::string str_a, std::string str_b, STR_WEIGHTS w,
+                     std::vector<std::vector<int>> similarity, penaltyFnType penaltyFn)
+{
+    this->str_u = str_a;
+    this->str_w = str_b;
+    this->WEIGHTS = w;
+    this->char_to_similarity_index = std::map<char, int>({{'A', 0},
+                                                          {'G', 1},
+                                                          {'C', 2},
+                                                          {'T', 3},
+                                                          {' ', 4}});
 
-        if (distance.size() == 0) {
-            distance = this->get_default_distance_matrix();
-        }
+    this->penaltyFn = penaltyFn;
 
-        this->generate_alignment_grid(similarity);
-        this->generate_distance_grid(distance);
+    if (similarity.size() == 0)
+    {
+        similarity = this->get_default_similarity_matrix();
     }
 
-    std::pair<std::string, std::string> global_alignment() {
-        int len1 = this->str_a.length() + 1;
-        int len2 = this->str_b.length() + 1;
+    this->generate_alignment_grid(similarity);
+}
 
-        int row = len2 - 1;
-        int col = len1 - 1;
+std::pair<std::string, std::string> Alignment::global_alignment()
+{
+    int len_u = (int) (this->str_u.length() + 1);
+    int len_w = (int) (this->str_w.length() + 1);
 
-        std::vector<std::pair<int, int>> path = std::vector<std::pair<int, int>>();
+    int j = len_w - 1;
+    int i = len_u - 1;
 
-        while (true) {
-            if (row == 0 && col == 0) {
-                break;
-            }
+    std::vector<std::pair<int, int>> path = std::vector<std::pair<int, int>>();
 
-            path.push_back(std::pair<int, int>(row, col));
-
-            Alignment::DIRECTIONS dir = this->track[row][col];
-
-            if (dir == Alignment::DIRECTIONS::DIAGONAL) {
-                row -= 1;
-                col -= 1;
-            }
-            else if (dir == Alignment::DIRECTIONS::TOP) {
-                row -= 1;
-            }
-            else if (dir == Alignment::DIRECTIONS::LEFT) {
-                col -= 1;
-            }
+    while (true)
+    {
+        if (j == 0 && i == 0)
+        {
+            break;
         }
 
-        std::reverse(path.begin(), path.end());
+        path.push_back(std::pair<int, int>(j, i));
 
-        std::string top = "";
-        std::string side = "";
+        Alignment::DIRECTIONS dir = this->track[j][i];
 
-        for (auto p : path) {
-            int row = p.first;
-            int col = p.second;
-
-            if (this->track[row][col] == Alignment::DIRECTIONS::DIAGONAL) {
-                top += this->str_a[col - 1];
-                side += this->str_b[row - 1];
-            }
-            else if (this->track[row][col] == Alignment::DIRECTIONS::LEFT) {
-                top += this->str_a[col - 1];
-                side += Alignment::GAP_SYMBOL;
-            }
-            else {
-                top += Alignment::GAP_SYMBOL;
-                side += this->str_b[row - 1];
-            }
+        if (dir == Alignment::DIRECTIONS::DIAGONAL)
+        {
+            j -= 1;
+            i -= 1;
         }
-
-        return std::pair<std::string, std::string>(top, side);
+        else if (dir == Alignment::DIRECTIONS::LEFT)
+        {
+            j -= 1;
+        }
+        else if (dir == Alignment::DIRECTIONS::TOP)
+        {
+            i -= 1;
+        }
     }
 
-    std::pair<std::string, std::string> local_alignment() {
-        int len1 = this->str_a.length() + 1;
-        int len2 = this->str_b.length() + 1;
+    std::reverse(path.begin(), path.end());
 
-        std::vector<std::pair<int, int>> path = std::vector<std::pair<int, int>>();
-        int row = 0;
-        int col = 0;
-        int max_elem = this->grid[0][0];
+    std::string top = "";
+    std::string side = "";
 
-        for (int i = 0; i < this->grid.size(); ++i) {
-            for (int j = 0; j < this->grid[i].size(); ++j) {
-                if (this->grid[i][j] > max_elem) {
-                    max_elem = this->grid[i][j];
-                    row = i;
-                    col = j;
-                }
-            }
+    for (auto p : path)
+    {
+        int row2 = p.first;
+        int col2 = p.second;
+
+        if (this->track[row2][col2] == Alignment::DIRECTIONS::DIAGONAL)
+        {
+            top += this->str_u[col2 - 1];
+            side += this->str_w[row2 - 1];
         }
-
-        while (true) {
-            if (row <= 0 || col <= 0) {
-                break;
-            }
-            else if (this->grid[row][col] < 0) {
-                break;
-            }
-
-            path.push_back(std::pair<int, int>(row, col));
-
-            Alignment::DIRECTIONS dir = this->track[row][col];
-
-            if (dir == Alignment::DIRECTIONS::DIAGONAL) {
-                row -= 1;
-                col -= 1;
-            }
-            else if (dir == Alignment::DIRECTIONS::TOP) {
-                row -= 1;
-            }
-            else if (dir == Alignment::DIRECTIONS::LEFT) {
-                col -= 1;
-            }
+        else if (this->track[row2][col2] == Alignment::DIRECTIONS::TOP)
+        {
+            top += this->str_u[col2 - 1];
+            side += Alignment::GAP_SYMBOL;
         }
-
-        std::reverse(path.begin(), path.end());
-
-        std::string top = "";
-        std::string side = "";
-
-        for (auto p : path) {
-            int row = p.first;
-            int col = p.second;
-
-            if (this->track[row][col] == Alignment::DIRECTIONS::DIAGONAL) {
-                top += this->str_a[col - 1];
-                side += this->str_b[row - 1];
-            }
-            else if (this->track[row][col] == Alignment::DIRECTIONS::LEFT) {
-                top += this->str_a[col - 1];
-                side += Alignment::GAP_SYMBOL;
-            }
-            else {
-                top += Alignment::GAP_SYMBOL;
-                side += this->str_b[row - 1];
-            }
+        else
+        {
+            top += Alignment::GAP_SYMBOL;
+            side += this->str_w[row2 - 1];
         }
-
-        return std::pair<std::string, std::string>(top, side);
     }
 
-    int get_edit_distance() {
-        return this->distanceGrid.back().back();
+    return std::pair<std::string, std::string>(top, side);
+}
+
+int Alignment::get_similarity()
+{
+    return this->S.back().back();
+}
+
+void Alignment::debugS()
+{
+    std::cout << "\nS\n\t";
+    unsigned long len_u = this->str_u.length() + 1;
+    unsigned long len_w = this->str_w.length() + 1;
+
+    const std::string track_to_symbol[] = {"↑", "←", "↖"};
+
+    std::cout << "      ";
+
+    for (int j = 1; j < len_w; ++j)
+    {
+        std::cout << "\t\t" << this->str_w[j - 1];
+    }
+    std::cout << "\n";
+
+    std::cout << "";
+
+    for (int j = 0; j < len_w; ++j)
+    {
+        std::cout << "\t\t" << j;
     }
 
-    int get_similarity() {
-        return this->grid.back().back();
+    for (int i = 0; i < len_u; ++i)
+    {
+        std::cout << "\n";
+        if (i > 0)
+        {
+            std::cout << this->str_u[i - 1] << "\t" << i << " ";
+        }
+        else
+        {
+            std::cout << "\t" << i << " ";
+        }
+
+        for (int j = 0; j < len_w; ++j)
+        {
+            int idx = (int) this->track[j][i];
+            int s = this->S[i][j];
+            if (s >= 0)
+            {
+                std::cout << " ";
+            }
+            std::cout << s << " " << track_to_symbol[idx] << "\t";
+        }
     }
-};
+    std::cout << std::endl;
+    std::cout << "similarity: " << this->get_similarity() << "\n";
+    std::pair<std::string, std::string> result = this->global_alignment();
+    std::cout << result.first << "\n";
+    std::cout << result.second << "\n";
+    std::cout << std::endl;
+}
+
+void Alignment::debugC()
+{
+    std::cout << "\nC\n\t";
+    unsigned long len_u = this->str_u.length() + 1;
+    unsigned long len_w = this->str_w.length() + 1;
+
+    const std::string track_to_symbol[] = {"↑", "←", "↖"};
+
+    std::cout << "      ";
+
+    for (int j = 1; j < len_w; ++j)
+    {
+        std::cout << "\t\t" << this->str_w[j - 1];
+    }
+    std::cout << "\n";
+
+    std::cout << "";
+
+    for (int j = 0; j < len_w; ++j)
+    {
+        std::cout << "\t\t" << j;
+    }
+
+    for (int i = 0; i < len_u; ++i)
+    {
+        std::cout << "\n";
+        if (i > 0)
+        {
+            std::cout << this->str_u[i - 1] << "\t" << i << " ";
+        }
+        else
+        {
+            std::cout << "\t" << i << " ";
+        }
+
+        for (int j = 0; j < len_w; ++j)
+        {
+            int s = this->C[i][j];
+            std::cout << s << "\t";
+        }
+    }
+    std::cout << std::endl;
+    std::cout << std::endl;
+}
